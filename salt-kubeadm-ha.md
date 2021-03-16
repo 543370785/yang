@@ -2,25 +2,26 @@
 
 - 在Kubernetes v1.13版本开始，kubeadm正式可以生产使用，但是kubeadm手动操作依然很繁琐，这里使用SaltStack进行自动化部署。
 
-## 版本明细：Release-v1.19.6
+## 版本明细：Release-v1.18.8
 
 - 支持高可用HA
-- 测试通过系统： CentOS 7.9
-- salt-ssh:    3002.2
-- kubernetes： v1.17.16 v1.18.8 v1.19.6
-- docker-ce:   19.03.8
+- 测试通过系统：CentOS 7.9
+- salt-ssh:     3002.2
+- kubernetes：  v1.18.8
+- docker-ce:    19.03.8
 
-> 注意：从Kubernetes 1.16版本开始很多API名称发生了变化，例如常用的daemonsets, deployments, replicasets的API从extensions/v1beta1全部更改为apps/v1，所有老的YAML文件直接使用会有报错，请注意修改，详情可参考[Kubernetes 1.19 CHANGELOG](https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG-1.19.md)
+> 注意：从Kubernetes 1.16版本开始很多API名称发生了变化，例如常用的daemonsets, deployments, replicasets的API从extensions/v1beta1全部更改为apps/v1，所有老的YAML文件直接使用会有报错，请注意修改，详情可参考[Kubernetes 1.18 CHANGELOG](https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG-1.18.md)
 
 ### 架构介绍
 建议部署节点：最少三个节点，请配置好主机名解析（必备）
 1. 使用Salt Grains进行角色定义，增加灵活性。
 2. 使用Salt Pillar进行配置项管理，保证安全性。
 3. 使用Salt SSH执行状态，不需要安装Agent，保证通用性。
-4. 使用Kubernetes当前稳定版本v1.19.6，保证稳定性。
+4. 使用Kubernetes当前稳定版本v1.18.8，保证稳定性。
 
 ### 技术交流群（加群请备注来源于Github）：
 - 云计算与容器架构师：252370310
+
 
 # 部署手册
 
@@ -51,6 +52,7 @@ linux-node3.example.com
 192.168.56.11 linux-node1 linux-node1.example.com
 192.168.56.12 linux-node2 linux-node2.example.com
 192.168.56.13 linux-node3 linux-node3.example.com
+
 ```
 **1.3 关闭SELinux**
 
@@ -72,14 +74,14 @@ SELINUX=disabled #修改为disabled
 [root@linux-node1 ~]# yum update -y && reboot
 ```
 
-> 注意：以上初始化操作需要所有节点都执行，缺少步骤会导致无法安装。Kubernetes要求集群的时间同步，并且主机名不能相同，而且保证可以解析。
+> 注意：以上初始化操作需要所有节点都执行，缺少步骤会导致无法安装。
 
 
 ## 2.安装Salt-SSH并克隆本项目代码。
 
 **2.1 设置部署节点到其它所有节点的SSH免密码登录（包括本机）**
 
-```
+```bash
 [root@linux-node1 ~]# ssh-keygen -t rsa -q -N ''
 [root@linux-node1 ~]# ssh-copy-id linux-node1
 [root@linux-node1 ~]# ssh-copy-id linux-node2
@@ -92,7 +94,7 @@ SELINUX=disabled #修改为disabled
 [root@linux-node1 ~]# wget -O /etc/yum.repos.d/epel.repo http://mirrors.aliyun.com/repo/epel-7.repo
 [root@linux-node1 ~]# yum install -y https://repo.saltstack.com/py3/redhat/salt-py3-repo-latest.el7.noarch.rpm
 [root@linux-node1 ~]# sed -i "s/repo.saltstack.com/mirrors.aliyun.com\/saltstack/g" /etc/yum.repos.d/salt-py3-latest.repo
-[root@linux-node1 ~]# yum install -y salt-ssh git unzip ntpdate
+[root@linux-node1 ~]# yum install -y salt-ssh git unzip
 ```
 
 **2.3 获取本项目代码，并放置在/srv目录**
@@ -140,14 +142,44 @@ linux-node3:
 
 > k8s-role: 用来设置K8S的角色
 
+### Kubernetes多Master部署
+
+```
+[root@linux-node1 ~]# vim /etc/salt/roster 
+linux-node1:
+  host: 192.168.56.11
+  user: root
+  priv: /root/.ssh/id_rsa
+  minion_opts:
+    grains:
+      k8s-role: master
+
+linux-node2:
+  host: 192.168.56.12
+  user: root
+  priv: /root/.ssh/id_rsa
+  minion_opts:
+    grains:
+      k8s-role: master
+
+linux-node3:
+  host: 192.168.56.13
+  user: root
+  priv: /root/.ssh/id_rsa
+  minion_opts:
+    grains:
+      k8s-role: node
+```
+
+
 ## 4.修改对应的配置参数，本项目使用Salt Pillar保存配置
 ```
 [root@linux-node1 ~]# vim /srv/pillar/k8s.sls
 #设置需要安装的Kubernetes版本
-K8S_VERSION: "1.19.6"
+K8S_VERSION: "1.18.8"
 
 #设置软件包的版本，和安装版本有区别
-K8S_PKG_VERSION: "1.19.6-0"
+K8S_PKG_VERSION: "1.18.8-0"
 
 #设置高可用集群VIP地址（部署高可用必须修改）
 MASTER_VIP: "192.168.56.10"
@@ -175,6 +207,7 @@ POD_CIDR: "10.2.0.0/16"
 
 #设置集群的DNS域名
 CLUSTER_DNS_DOMAIN: "cluster.local."
+
 ```
 
 ## 5.集群部署
@@ -182,7 +215,7 @@ CLUSTER_DNS_DOMAIN: "cluster.local."
 ### 5.1 测试Salt SSH联通性
 
 ```
-[root@linux-node1 ~]# salt-ssh -i '*' -r 'yum install -y python3 && swapoff -a && ntpdate time1.aliyun.com'
+[root@linux-node1 ~]# salt-ssh -i '*' -r 'yum install -y python3'
 [root@linux-node1 ~]# salt-ssh -i '*' test.ping
 linux-node2:
     True
@@ -191,12 +224,14 @@ linux-node3:
 linux-node1:
     True
 ```
-> 此步骤是测试salt-ssh可以联通待部署的节点，保证没有问题，都返回True方可继续，如果有异常请先解决异常。保证机器没有SWAP分区，如果存在需要关闭，如果不是全新的系统，请谨慎执行关闭交换分区操作！
+> 保证没有问题，都返回True再继续。
 
 ### 5.2 部署K8S集群基础组件
 
-执行高级状态，会根据定义的角色再对应的机器部署对应的服务，例如安装kubeadm、kubelet、docker，加载IPVS内核模板，调整内核参数，生成kubeadm的配置文件等。
+执行高级状态，会根据定义的角色再对应的机器部署对应的服务
 ```
+#保证机器没有SWAP分区，如果存在需要关闭，如果不是全新的系统，请谨慎执行关闭交换分区操作！
+[root@linux-node1 ~]# salt-ssh '*' -r 'swapoff -a'
 [root@linux-node1 ~]# salt-ssh '*' state.highstate
 ```
 
@@ -226,6 +261,12 @@ Total run time:  733.939 s
 ```
 > 需要下载Kubernetes所有应用服务镜像，根据网络情况，时间可能较长，请等待。可以在新窗口，docker images查看下载镜像进度。
 
+2. 多Master初始化
+
+```
+[root@linux-node1 ~]# kubeadm init --config /etc/sysconfig/kubeadm-ha.yml --upload-certs --ignore-preflight-errors=NumCPU
+```
+
 ### 5.4 为kubectl准备配置文件
 
 kubectl默认会在用户的家目录寻找.kube/config配置文件，下面使用管理员的配置
@@ -235,6 +276,20 @@ kubectl默认会在用户的家目录寻找.kube/config配置文件，下面使�
 [root@linux-node1 ~]# cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
 [root@linux-node1 ~]# chown $(id -u):$(id -g) $HOME/.kube/config
 ```
+### 5.5 多集群控制节点添加
+
+> 如果是多Master节点，需要将其它节点加入到集群中。非多Master请忽略本步骤。
+
+You can now join any number of the control-plane node running the following command on each as root:
+
+  kubeadm join 192.168.56.10:8443 --token abcdef.0123456789abcdef \
+    --discovery-token-ca-cert-hash sha256:e1faf2d489ff739544b3b46a5ced36a1e51b550b6d3ef9f8b29681bd1ae3bbb1 \
+    --control-plane --certificate-key c725f2793006a655dc381e9ee4cb8bc9ab09d148ea8d54475e815c99f5ac2051
+
+Please note that the certificate-key gives access to cluster sensitive data, keep it secret!
+As a safeguard, uploaded-certs will be deleted in two hours; If necessary, you can use
+"kubeadm init phase upload-certs --upload-certs" to reload certs afterward.
+
 
 ### 5.6 部署网络插件Flannel
 
@@ -273,9 +328,9 @@ kubeadm join 192.168.56.11:6443 --token qnlyhw.cr9n8jbpbkg94szj     --discovery-
 ```
 [root@linux-node1 ~]# kubectl get node
 NAME            STATUS    ROLES     AGE       VERSION
-192.168.56.11   Ready     master    1m        v1.19.6
-192.168.56.12   Ready     <none>    1m        v1.19.6
-192.168.56.13   Ready     <none>    1m        v1.19.6
+192.168.56.11   Ready     master    1m        v1.18.3
+192.168.56.12   Ready     <none>    1m        v1.18.3
+192.168.56.13   Ready     <none>    1m        v1.18.3
 ```
 
 ## 7.测试Kubernetes集群和Flannel网络
@@ -312,9 +367,9 @@ rtt min/avg/max/mdev = 8.729/8.729/8.729/0.000 ms
 ```
 [root@linux-node1 ~]# kubectl get node
 NAME                      STATUS   ROLES    AGE    VERSION
-linux-node1.example.com   Ready    master   120m   v1.19.6
-linux-node2.example.com   Ready    <none>   113m   v1.19.6
-linux-node3.example.com   Ready    <none>   108m   v1.19.6
+linux-node1.example.com   Ready    master   120m   v1.18.3
+linux-node2.example.com   Ready    <none>   113m   v1.18.3
+linux-node3.example.com   Ready    <none>   108m   v1.18.3
 
 [root@linux-node1 ~]# kubectl label nodes linux-node2.example.com edgenode=true
 
@@ -338,11 +393,10 @@ linux-node3.example.com   Ready    <none>   108m   v1.19.6
 ```
 [root@linux-node1 ~]# helm version
 version.BuildInfo{Version:"v3.2.4", GitCommit:"b29d20baf09943e134c2fa5e1e1cab3bf93315fa", GitTreeState:"clean", GoVersion:"go1.13.7"}
+
 ```
 
-> ------------------------------------------------------------------------------
-
-## 如何新增Kubernetes Node节点
+## 如何新增Kubernetes节点
 
 1.设置SSH无密码登录
 ```
